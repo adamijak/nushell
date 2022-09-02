@@ -15,7 +15,7 @@ use reqwest::blocking::Response;
 use std::collections::HashMap;
 use std::io::BufReader;
 
-use reqwest::StatusCode;
+use reqwest::{Method, StatusCode};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
@@ -34,6 +34,12 @@ impl Command for SubCommand {
                 "URL",
                 SyntaxShape::String,
                 "the URL to fetch the contents from",
+            )
+            .named(
+                "method",
+                SyntaxShape::String,
+                "HTTP request method to use",
+                Some('m'),
             )
             .named(
                 "user",
@@ -316,6 +322,7 @@ impl Command for SubCommand {
 }
 
 struct Arguments {
+    method: Option<Value>,
     url: Option<Value>,
     raw: bool,
     user: Option<String>,
@@ -331,6 +338,7 @@ fn run_fetch(
     _input: PipelineData,
 ) -> Result<nu_protocol::PipelineData, nu_protocol::ShellError> {
     let args = Arguments {
+        method: call.get_flag(engine_state, stack, "method")?,
         url: Some(call.req(engine_state, stack, 0)?),
         raw: call.has_flag("raw"),
         user: call.get_flag(engine_state, stack, "user")?,
@@ -370,6 +378,8 @@ fn helper(
             ));
         }
     };
+
+    let method_value = args.method;
     let user = args.user.clone();
     let password = args.password;
     let timeout = args.timeout;
@@ -382,7 +392,41 @@ fn helper(
     };
 
     let client = http_client();
-    let mut request = client.get(url);
+    let valid_methods = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::HEAD,
+        Method::OPTIONS,
+        Method::CONNECT,
+        Method::PATCH,
+        Method::TRACE,
+    ];
+    let method = if let Some(method_value) = method_value {
+        {
+            let method_str = method_value.as_string()?;
+            let err = Err(ShellError::UnsupportedInput(
+                "Invalid HTTP request method. For list of valid methods run `help fetch`"
+                    .to_string(),
+                method_value.span().unwrap_or_else(|_| Span::new(0, 0)),
+            ));
+            match Method::from_str(&method_str) {
+                Ok(t) => {
+                    if valid_methods.contains(&t) {
+                        Ok(t)
+                    } else {
+                        err
+                    }
+                }
+                Err(_e) => err,
+            }
+        }
+    } else {
+        Ok(Method::GET)
+    }?;
+
+    let mut request = client.request(method, url);
 
     if let Some(timeout) = timeout {
         let val = timeout.as_i64()?;
