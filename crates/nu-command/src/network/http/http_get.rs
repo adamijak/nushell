@@ -29,7 +29,7 @@ impl Command for SubCommand {
     }
 
     fn usage(&self) -> &str {
-        "Make http request"
+        "Make HTTP GET request."
     }
 
     fn run(
